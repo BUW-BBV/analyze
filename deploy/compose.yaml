@@ -1,0 +1,118 @@
+# Analyzer behind the Traefik proxy on the server (network traefik_public, resolver myresolver).
+#   cd deploy && cp .env.example .env   # then fill it in
+#   docker compose up -d --build
+# The only way in is the "auth" service: it sends every visitor to Keycloak and lets through only
+# members of the analyzer groups. The app itself is on a private network and checks Keycloak's
+# signed token again on every request.
+# Data lives in $ANALYZER_DATA (default ../../data): state/ (database, providers.json) and
+# documents/ (the provider folders, mounted read-only).
+name: analyzer
+
+services:
+  app:
+    build: ..
+    image: analyzer:latest
+    restart: unless-stopped
+    environment:
+      PUBLIC_URL: https://${ANALYZER_HOST:?set ANALYZER_HOST in .env}
+      OIDC_ISSUER: ${OIDC_ISSUER:?set OIDC_ISSUER in .env}
+      OIDC_AUDIENCE: analyzer
+      PROVIDERS_FILE: /state/providers.json
+    volumes:
+      - ${ANALYZER_DATA:-../../data}/state:/state
+      - ${ANALYZER_DATA:-../../data}/documents:/documents:ro
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 2g
+    networks:
+      - backend
+
+  auth:
+    image: quay.io/oauth2-proxy/oauth2-proxy:${OAUTH2_PROXY_VERSION:-v7.15.6}
+    restart: unless-stopped
+    depends_on:
+      - app
+    env_file: .env # OAUTH2_PROXY_CLIENT_SECRET, OAUTH2_PROXY_COOKIE_SECRET
+    environment:
+      OAUTH2_PROXY_PROVIDER: keycloak-oidc
+      OAUTH2_PROXY_OIDC_ISSUER_URL: ${OIDC_ISSUER:?set OIDC_ISSUER in .env}
+      OAUTH2_PROXY_CLIENT_ID: analyzer
+      OAUTH2_PROXY_REDIRECT_URL: https://${ANALYZER_HOST:?set ANALYZER_HOST in .env}/oauth2/callback
+      OAUTH2_PROXY_SCOPE: openid email profile
+      OAUTH2_PROXY_CODE_CHALLENGE_METHOD: S256
+      OAUTH2_PROXY_EMAIL_DOMAINS: "*"
+      OAUTH2_PROXY_ALLOWED_GROUPS: analyzer-users,analyzer-admins,analyzer-viewers
+      # accounts are created by the administrator, so the address is trusted without a verification mail
+      OAUTH2_PROXY_INSECURE_OIDC_ALLOW_UNVERIFIED_EMAIL: "true"
+      OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
+      OAUTH2_PROXY_REVERSE_PROXY: "true"
+      OAUTH2_PROXY_UPSTREAMS: http://app:3210
+      OAUTH2_PROXY_UPSTREAM_TIMEOUT: 120s
+      OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "true" # hands Keycloak's ID token to the app
+      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
+      OAUTH2_PROXY_API_ROUTES: ^/api/ # expired session on a data request: answer 401 instead of a redirect
+      OAUTH2_PROXY_WHITELIST_DOMAINS: ${OIDC_HOST:?set OIDC_HOST in .env}
+      OAUTH2_PROXY_COOKIE_NAME: __Host-analyzer
+      OAUTH2_PROXY_COOKIE_SECURE: "true"
+      OAUTH2_PROXY_COOKIE_SAMESITE: lax
+      OAUTH2_PROXY_COOKIE_EXPIRE: 12h
+      OAUTH2_PROXY_COOKIE_REFRESH: 4m # Keycloak tokens live 5 minutes
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    networks:
+      - backend
+      - traefik_public
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik_public
+      - traefik.http.routers.analyzer.rule=Host(`${ANALYZER_HOST:?set ANALYZER_HOST in .env}`)
+      - traefik.http.routers.analyzer.entrypoints=websecure
+      - traefik.http.routers.analyzer.tls.certresolver=myresolver
+      - traefik.http.routers.analyzer.middlewares=analyzer-headers
+      - traefik.http.services.analyzer.loadbalancer.server.port=4180
+      - traefik.http.middlewares.analyzer-headers.headers.stsSeconds=31536000
+      - traefik.http.middlewares.analyzer-headers.headers.stsIncludeSubdomains=true
+      - traefik.http.middlewares.analyzer-headers.headers.contentTypeNosniff=true
+      - traefik.http.middlewares.analyzer-headers.headers.frameDeny=true
+      - traefik.http.middlewares.analyzer-headers.headers.referrerPolicy=no-referrer
+
+  # Nightly, deduplicated snapshots of the database in $ANALYZER_DATA/backups (restic).
+  # List:    docker compose exec backup restic snapshots
+  # Restore: docker compose exec backup restic restore latest --target /tmp/restore
+  #          then copy analyzer.db out with `docker compose cp` and put it into state/ while the app is stopped.
+  # The repository is encrypted with RESTIC_PASSWORD from .env: without it the snapshots cannot be read.
+  backup:
+    build: ./backup
+    image: analyzer-backup:latest
+    restart: unless-stopped
+    environment:
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD:?set RESTIC_PASSWORD in .env}
+      BACKUP_TIME: "02:30" # UTC
+      RESTIC_REPOSITORY: /repo
+      RESTIC_CACHE_DIR: /tmp/restic-cache
+    volumes:
+      - ${ANALYZER_DATA:-../../data}/state:/state
+      - ${ANALYZER_DATA:-../../data}/backups:/repo
+    read_only: true
+    tmpfs:
+      - /tmp:uid=1000,gid=1000
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    network_mode: none
+    mem_limit: 512m
+
+networks:
+  backend:
+  traefik_public:
+    external: true

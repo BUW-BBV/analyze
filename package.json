@@ -1,0 +1,30 @@
+{
+  "name": "analyzer",
+  "version": "1.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run scripts/dev.ts",
+    "server": "bun --watch server/index.ts",
+    "client": "vite",
+    "build": "vite build",
+    "start": "vite build && bun server/index.ts",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "docx-preview": "^0.4.1",
+    "exceljs": "^4.4.0",
+    "fflate": "^0.8.3",
+    "jose": "^6.2.17",
+    "pdfjs-dist": "^6.5.438",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@types/bun": "^1.4.4",
+    "svelte": "^5.57.3",
+    "svelte-check": "^4.7.8",
+    "typescript": "~6",
+    "vite": "^8.3.8"
+  }
+}
