@@ -1,8 +1,9 @@
 # Working in this repository
 
-Analyzer is a workbench for reading, annotating and coding project documents (qualitative content
-analysis after Mayring). Bun server (`server/`), Svelte 5 client (`src/`), SQLite database.
-`README.md` describes the features and where the code for each lives. Read it first.
+Instructions for AI agents (and people) changing the code. What the tool does and how it is used is
+in `README.md`; this file does not repeat it. Read the README's feature sections before changing a feature.
+
+Stack: Bun server (`server/`), Svelte 5 client built with Vite (`src/`), SQLite database, TypeScript throughout.
 
 ## This repository is public
 
@@ -32,7 +33,26 @@ docker build -t analyzer .   # the image a release is built from; must build
 For local work, copy `providers.example.json` to `providers.json` and point it at a folder of your
 own test files. Without `OIDC_ISSUER` the server runs without sign-in and listens on 127.0.0.1 only.
 
+## Code map
+
+| Area | Where |
+|---|---|
+| HTTP API, database schema, providers | `server/index.ts` |
+| Sign-in mode and roles | `server/auth.ts` |
+| File tree, access into (nested) zip archives | `server/files.ts` |
+| Spreadsheet parsing | `server/sheets.ts` |
+| API client | `src/lib/api.ts` |
+| App state; tab groups and splits | `src/lib/state.svelte.ts`, `src/lib/workspace.svelte.ts` |
+| Tables: filter, sort, group; columns per level | `src/lib/table.ts`, `src/lib/columns.ts`, `src/components/DataTable.svelte`, `Overview.svelte`, `InfoPanel.svelte` |
+| Content analysis | `src/lib/qia.svelte.ts`, `src/components/AnalysisView.svelte`; tables `analyses`, `categories`, `material`, coding columns on `annotations` |
+| Viewers and annotation | `src/components/PdfViewer.svelte`, `SheetViewer.svelte`, `DocView.svelte`, `PlainView.svelte`, `AnnotationPanel.svelte` |
+| Translations | `t("English text")` from `src/lib/i18n.svelte.ts`; German in `src/lib/dict.ts` |
+| Image and reference server setup | `Dockerfile`, `deploy/` |
+
 ## Rules for changes
+
+- **Keep the two files apart.** A change that users or operators notice updates `README.md`; a change
+  to structure, checks or conventions updates this file. Do not copy one into the other.
 
 - **Svelte 5 runes only** (`$state`, `$derived`, `$props`, `onclick`), no stores, no legacy syntax.
 - **Every UI string** goes through `t("English text")` and gets its German entry in `src/lib/dict.ts`.
